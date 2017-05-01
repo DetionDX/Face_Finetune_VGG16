@@ -7,6 +7,6 @@ download the lfw data and pair.txt from: http://vis-www.cs.umass.edu/lfw/
 
 To run the result directly using the pretrained VGG16: 
 
-python lfw.py 
+$ python lfw.py 
 
 tips: you should modify the image_path in the code to your local folder stored the lfw images.
