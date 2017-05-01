@@ -5,6 +5,8 @@ download the pretrained vgg16_weights.npz model from: http://www.cs.toronto.edu/
 
 download the lfw data and pair.txt from: http://vis-www.cs.umass.edu/lfw/
 
+preprocessing crop the images using MTCNN: https://kpzhang93.github.io/MTCNN_face_detection_alignment/
+
 To run the result directly using the pretrained VGG16: 
 
 $ python lfw.py 
