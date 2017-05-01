@@ -11,4 +11,4 @@ To run the result directly using the pretrained VGG16:
 
 $ python lfw.py 
 
-tips: you should modify the image_path in the code to your local folder stored the lfw images.
+tips: you should modify the image_path in the code "lfw.py" to your local folder stored the lfw images.
