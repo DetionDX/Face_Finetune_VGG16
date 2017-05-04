@@ -9,7 +9,7 @@ preprocessing crop the images using MTCNN: https://kpzhang93.github.io/MTCNN_fac
 
 
 
-To run the result directly using the pretrained VGG16: 
+(1) To run the result directly using the pretrained VGG16: 
 
 $ python lfw.py 
 
@@ -18,7 +18,7 @@ tips: you should modify the image_path in the code "lfw.py" to your local folder
 
 
 
-Finetuning:
+(2) Finetuning:
 
 This work is finetuning the pretrained weights VGG16 on LFW PairsDevtrain.txt using siamese network. 
 
