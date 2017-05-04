@@ -8,256 +8,223 @@
 # Weights from Caffe converted using https://github.com/ethereon/caffe-tensorflow      #
 ########################################################################################
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import cv2 as cv
 import tensorflow as tf
 import numpy as np
-import cv2 as cv
+import os
+import vgg16_siamese
+from sklearn.metrics import roc_curve, auc
+from scipy import spatial
+import matplotlib.pyplot as plt
 
 
-class vgg16:
-    def __init__(self, imgs, weights=None, sess=None):
-        self.imgs = imgs
-        self.convlayers()
-        self.fc_layers()
-        self.probs = tf.nn.softmax(self.fc3l)
-        if weights is not None and sess is not None:
-            self.load_weights(weights, sess)
+def load_data(image_paths, pair_list):
+    left = []
+    right = []
+    label=np.zeros(len(pair_list))
+    c = 0
+    for img in pair_list:
+        item = img.split('\t')
+        if len(item)==3:
+            idx = format(int(item[1]),'04d')
+            sub1 = image_paths+item[0]+'/'+ item[0]+'_'+ idx+ '.png'
+            idx = format(int(item[2]), '04d')
+            sub2 = image_paths+item[0]+'/'+ item[0]+'_'+ idx+ '.png'
+            label[c] = 1
+        elif len(item)==4:
+            idx = format(int(item[1]),'04d')
+            sub1 = image_paths+item[0]+'/'+ item[0]+'_'+ idx+ '.png'
+            idx = format(int(item[3]), '04d')
+            sub2 = image_paths+item[2]+'/'+ item[2]+'_'+ idx+ '.png'
+            label[c] = -1
+        c = c+1
+        left.append(sub1)
+        right.append(sub2)
+    return left, right, label
 
 
-    def convlayers(self):
-        self.parameters = []
+def load_img(dice,left_path,right_path,label):
+    left_img = []
+    right_img = []
+    out_label = []
+    # print('loading data...')
+    for i in dice:
+        left_img.append(cv.imread(left_path[i],1))
+        right_img.append(cv.imread(right_path[i], 1))
+        out_label.append(label[i])
+    left_img = np.stack(left_img)
+    right_img = np.stack(right_img)
 
-        # zero-mean input
-        with tf.name_scope('preprocess') as scope:
-            mean = tf.constant([123.68, 116.779, 103.939], dtype=tf.float32, shape=[1, 1, 1, 3], name='img_mean')
-            images = self.imgs-mean
+    return left_img, right_img, out_label
 
-        # conv1_1
-        with tf.name_scope('conv1_1') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 3, 64], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[64], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv1_1 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+def load_test_img(test_images_l, test_images_r):
+    left_img = cv.imread(test_images_l, 1)
+    right_img = cv.imread(test_images_r, 1)
 
-        # conv1_2
-        with tf.name_scope('conv1_2') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 64, 64], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv1_1, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[64], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv1_2 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+    return left_img, right_img
 
-        # pool1
-        self.pool1 = tf.nn.max_pool(self.conv1_2,
-                               ksize=[1, 2, 2, 1],
-                               strides=[1, 2, 2, 1],
-                               padding='SAME',
-                               name='pool1')
+lr = 0.000000001
+sess = tf.InteractiveSession()
 
-        # conv2_1
-        with tf.name_scope('conv2_1') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 64, 128], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.pool1, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[128], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv2_1 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+weight = 'vgg16_weights.npz'
 
-        # conv2_2
-        with tf.name_scope('conv2_2') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 128, 128], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv2_1, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[128], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv2_2 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+siamese = vgg16_siamese.siemese(weight)
 
-        # pool2
-        self.pool2 = tf.nn.max_pool(self.conv2_2,
-                               ksize=[1, 2, 2, 1],
-                               strides=[1, 2, 2, 1],
-                               padding='SAME',
-                               name='pool2')
+train_step = tf.train.GradientDescentOptimizer(learning_rate=lr).minimize(siamese.loss)
 
-        # conv3_1
-        with tf.name_scope('conv3_1') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 128, 256], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.pool2, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[256], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv3_1 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+saver = tf.train.Saver()
+tf.global_variables_initializer().run()
 
-        # conv3_2
-        with tf.name_scope('conv3_2') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 256, 256], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv3_1, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[256], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv3_2 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
 
-        # conv3_3
-        with tf.name_scope('conv3_3') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 256, 256], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv3_2, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[256], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv3_3 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+num_epoch = 10
+# 2000 training samples
+batch_size = 20
+iteration_num  = 100
 
-        # pool3
-        self.pool3 = tf.nn.max_pool(self.conv3_3,
-                               ksize=[1, 2, 2, 1],
-                               strides=[1, 2, 2, 1],
-                               padding='SAME',
-                               name='pool3')
+eval_iter = 1
+train_iter = 1
 
-        # conv4_1
-        with tf.name_scope('conv4_1') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 256, 512], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.pool3, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[512], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv4_1 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+image_path = '/home/labuser/Documents/lfw/lfw_mtcnnpy_224/'
+train = 'pairsDevTrain.txt'
+test = 'pairs.txt'
 
-        # conv4_2
-        with tf.name_scope('conv4_2') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 512, 512], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv4_1, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[512], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv4_2 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+with open(train) as f:
+    train_list = f.readlines()
+train_list.pop(0)
+with open(test) as f:
+    test_list = f.readlines()
+test_list.pop(0)
 
-        # conv4_3
-        with tf.name_scope('conv4_3') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 512, 512], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv4_2, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[512], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv4_3 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+train_images_l,train_images_r, train_label = load_data(image_path, train_list)
+test_images_l, test_images_r, test_label = load_data(image_path, test_list)
 
-        # pool4
-        self.pool4 = tf.nn.max_pool(self.conv4_3,
-                               ksize=[1, 2, 2, 1],
-                               strides=[1, 2, 2, 1],
-                               padding='SAME',
-                               name='pool4')
+new = False
+model_ckpt = 'model.ckpt'
+if os.path.isfile(model_ckpt):
+    input_var = None
+    while input_var not in ['yes', 'no']:
+        input_var = raw_input("We found model.ckpt file. Do you want to load it [yes/no]?")
+    if input_var == 'yes':
+        new = False
 
-        # conv5_1
-        with tf.name_scope('conv5_1') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 512, 512], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.pool4, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[512], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv5_1 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+best_auc = 0
+# start training
+if new:
+    for epoch in range(num_epoch):
 
-        # conv5_2
-        with tf.name_scope('conv5_2') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 512, 512], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv5_1, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[512], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv5_2 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+        list = np.random.choice(len(train_images_l), len(train_images_l), replace=False)
 
-        # conv5_3
-        with tf.name_scope('conv5_3') as scope:
-            kernel = tf.Variable(tf.truncated_normal([3, 3, 512, 512], dtype=tf.float32,
-                                                     stddev=1e-1), name='weights')
-            conv = tf.nn.conv2d(self.conv5_2, kernel, [1, 1, 1, 1], padding='SAME')
-            biases = tf.Variable(tf.constant(0.0, shape=[512], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            out = tf.nn.bias_add(conv, biases)
-            self.conv5_3 = tf.nn.relu(out, name=scope)
-            self.parameters += [kernel, biases]
+        for step in range(iteration_num):
+            dice = np.random.choice(list, batch_size, replace=False)
+            batch_left, batch_right, batch_label = load_img(dice, train_images_l, train_images_r, train_label)
+            _, loss_v = sess.run([train_step, siamese.loss], feed_dict={
+                                siamese.x1: batch_left,
+                                siamese.x2: batch_right,
+                                siamese.y_: batch_label})
 
-        # pool5
-        self.pool5 = tf.nn.max_pool(self.conv5_3,
-                               ksize=[1, 2, 2, 1],
-                               strides=[1, 2, 2, 1],
-                               padding='SAME',
-                               name='pool4')
+            if step % 10 == 0:
+                print('this is epoch: [%d/%d] at step [%d/%d]' % (epoch, num_epoch, step, iteration_num))
 
-    def fc_layers(self):
-        # fc1
-        with tf.name_scope('fc1') as scope:
-            shape = int(np.prod(self.pool5.get_shape()[1:]))
-            fc1w = tf.Variable(tf.truncated_normal([shape, 4096],
-                                                         dtype=tf.float32,
-                                                         stddev=1e-1), name='weights')
-            fc1b = tf.Variable(tf.constant(1.0, shape=[4096], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            pool5_flat = tf.reshape(self.pool5, [-1, shape])
-            fc1l = tf.nn.bias_add(tf.matmul(pool5_flat, fc1w), fc1b)
-            self.fc1 = tf.nn.relu(fc1l)
-            self.parameters += [fc1w, fc1b]
+            if np.isnan(loss_v):
+                print('Model diverged with loss = NaN')
+                quit()
 
-        # fc2
-        with tf.name_scope('fc2') as scope:
-            fc2w = tf.Variable(tf.truncated_normal([4096, 4096],
-                                                         dtype=tf.float32,
-                                                         stddev=1e-1), name='weights')
-            fc2b = tf.Variable(tf.constant(1.0, shape=[4096], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            fc2l = tf.nn.bias_add(tf.matmul(self.fc1, fc2w), fc2b)
-            self.fc2 = tf.nn.relu(fc2l)
-            self.parameters += [fc2w, fc2b]
+        if epoch % train_iter == 0 and epoch>0:
+            print('training evaluating...')
+            loss = 0
+            score = np.zeros(len(train_label))
+            for j in range(len(train_label)):
+                left, right = load_test_img(train_images_l[j], train_images_r[j])
 
-        # fc3
-        with tf.name_scope('fc3') as scope:
-            fc3w = tf.Variable(tf.truncated_normal([4096, 1000],
-                                                         dtype=tf.float32,
-                                                         stddev=1e-1), name='weights')
-            fc3b = tf.Variable(tf.constant(1.0, shape=[1000], dtype=tf.float32),
-                                 trainable=True, name='biases')
-            self.fc3l = tf.nn.bias_add(tf.matmul(self.fc2, fc3w), fc3b)
-            self.parameters += [fc3w, fc3b]
+                loss = loss + siamese.loss.eval({siamese.x1: [left],siamese.x2:[right],siamese.y_: [train_label[j]]})
 
-    def load_weights(self, weight_file, sess):
-        weights = np.load(weight_file)
-        keys = sorted(weights.keys())
-        for i, k in enumerate(keys):
-            print i, k, np.shape(weights[k])
-            sess.run(self.parameters[i].assign(weights[k]))
+                feat_l = siamese.o1.eval({siamese.x1:[left]})
+                feat_r = siamese.o2.eval({siamese.x2: [right]})
+                dist = 1-spatial.distance.cosine(feat_l,feat_r)
+                # print(dist)
+                score[j] = dist
 
-if __name__ == '__main__':
-    sess = tf.Session()
-    imgs = tf.placeholder(tf.float32, [None, 224, 224, 3])
-    vgg = vgg16(imgs, 'vgg16_weights.npz', sess)
+            fpr = dict()
+            tpr = dict()
+            roc_auc = dict()
+            fpr, tpr, _ = roc_curve(train_label, score)
+            roc_auc = auc(fpr, tpr)
+            print('this is epoch: [%d/%d] at step [%d/%d] with loss: %f, auc: %f' % (epoch, num_epoch, step, iteration_num, loss, roc_auc))
 
-    img1 = cv.imread('laska.png', 1)
-    img1 = cv.resize(img1, (224, 224))
-    prob = sess.run(vgg.fc2, feed_dict={vgg.imgs: [img1]})[0]
-    #prob = np.array(prob)
-    print(prob.size)
+        if epoch % eval_iter == 0 and epoch > 0:
+            print('test evaluating...')
+            score = np.zeros(len(test_label))
+            for j in range(len(test_label)):
+                test_left, test_right = load_test_img(test_images_l[j], test_images_r[j])
+                feat_lt = siamese.o1.eval({siamese.x1: [test_left]})
+                feat_rt = siamese.o2.eval({siamese.x2: [test_right]})
+                dist = 1-spatial.distance.cosine(feat_lt,feat_rt)
+                score[j] = dist
+
+            fpr = dict()
+            tpr = dict()
+            roc_auc = dict()
+            fpr, tpr, _ = roc_curve(test_label, score)
+            roc_auc = auc(fpr, tpr)
+            print('ROC curve auc for testing: %f' % roc_auc)
+            # plt.show()
+            # plt.plot(fpr, tpr, color='red', label='ROC curve (area = %f)' % roc_auc)
+            # print('ROC auc %f' % roc_auc)
+            # plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
+            # plt.xlim([0.0, 1.0])
+            # plt.ylim([0.0, 1.05])
+            # plt.title('ROC for directly using vgg16 on lfw')
+            # plt.xlabel('False Positive Rate')
+            # plt.ylabel('True Positive Rate')
+            if roc_auc>=best_auc:
+                best_auc=roc_auc
+                print('best auc is: %f' % best_auc)
+                saver.save(sess, 'model.ckpt')
+
+else:
+    saver.restore(sess, 'model.ckpt')
+    print('test evaluating...')
+    score = np.zeros(len(test_label))
+    for j in range(len(test_label)):
+        test_left, test_right = load_test_img(test_images_l[j], test_images_r[j])
+        feat_lt = siamese.o1.eval({siamese.x1: [test_left]})
+        feat_rt = siamese.o2.eval({siamese.x2: [test_right]})
+        dist = 1 - spatial.distance.cosine(feat_lt, feat_rt)
+        score[j] = dist
+
+    fpr = dict()
+    tpr = dict()
+    roc_auc = dict()
+    fpr, tpr, _ = roc_curve(test_label, score)
+    roc_auc = auc(fpr, tpr)
+    print('ROC curve auc for testing: %f' % roc_auc)
+    plt.plot(fpr, tpr, color='red', label='ROC curve (area = %f)' % roc_auc)
+    print('ROC auc %f' % roc_auc)
+    plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.title('ROC for directly using vgg16 on lfw')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
