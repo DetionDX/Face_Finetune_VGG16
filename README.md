@@ -15,6 +15,7 @@ tips: you should modify the image_path in the code "lfw.py" to your local folder
 
 
 Finetuning:
+
 This work is finetuning the pretrained weights VGG16 on LFW PairsDevtrain.txt using siamese network. 
 
 vgg16_siamese.py defined the network framework.
