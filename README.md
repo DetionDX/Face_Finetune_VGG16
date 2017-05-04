@@ -31,6 +31,7 @@ To run these codes, you should set the lfw dataset path and PairsDevtrain.txt, P
 (3) Result:
 
 For the result directly using the pretrained VGG16, the Area under ROC curve is about 0.773303
+
 For the result by finetuing the pretrained VGG16, the area under ROC curve is about 0.811436
 
 (4)Problem:
